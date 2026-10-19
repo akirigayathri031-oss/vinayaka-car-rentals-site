@@ -21,9 +21,11 @@
     "selfDeposit": 5000
   },
   "priceNotes": [
-    "Rate: Flat ₹12 per km across all destinations.",
-    "Driver allowance (bata): ₹200 per day (with driver).",
-    "Self drive: Fuel paid by customer. ₹5,000 refundable deposit taken at pickup.",
+    "Rate: ₹12 per km (a round trip counts both ways).",
+    "With driver: minimum 250 km billed per day, plus driver bata ₹200 per day.",
+    "Short trips up to 60 km (1 day): ₹12 per km, minimum fare ₹1,200.",
+    "Self drive: ₹2,400 per day includes 250 km per day; extra km ₹12. Fuel paid by customer.",
+    "Self drive: ₹5,000 refundable deposit taken at pickup.",
     "Tolls, parking and border permits are extra as per actuals."
   ]
 }

@@ -67,72 +67,34 @@
   const btn = $('#book-btn');
   btn.textContent = Auth.token ? 'Book now' : 'Login to book';
 
-  /* ---------- Accurate ₹12/km Quote Calculator ---------- */
-  function refresh() {
+  /* ---------- Fare quote: always taken from the server, so the fare shown
+     here is exactly the fare that gets saved in the booking ---------- */
+  let quoteReq = 0;
+  async function refresh() {
     checkDates();
     if (!st.placeId) {
+      quoteReq++;
       lastQuote = null;
       $('#timeline').innerHTML = '';
       $('#quote-body').innerHTML = '<div class="empty">Choose a destination to see the fare.</div>';
       return;
     }
 
-    const place = places.find((p) => String(p.id) === String(st.placeId) || p.name === st.placeId);
-    if (!place) return;
-
-    // 1. Strict ₹12 per km rule
-    const ratePerKm = (cfg.pricing && cfg.pricing.ratePerKm) || 12;
-    const driverBataPerDay = (cfg.pricing && cfg.pricing.driverBataPerDay) || 200;
-    const depositAmount = (cfg.pricing && cfg.pricing.selfDeposit) || 5000;
-
-    const oneWayKm = place.km;
-    const totalKm = (st.tripType === 'round') ? (oneWayKm * 2) : oneWayKm;
-    const billableKm = totalKm;
-    const kmFare = billableKm * ratePerKm;
-
-    // 2. Driver charge: +₹200 per day with driver, ₹0 for self-drive
-    const driverBata = (st.mode === 'driver') ? (driverBataPerDay * st.days) : 0;
-    const total = kmFare + driverBata;
-
-    const lines = [
-      { label: `${billableKm} km × ₹${ratePerKm}`, amount: kmFare }
-    ];
-
-    if (st.mode === 'driver') {
-      lines.push({
-        label: `Driver bata (${st.days} day${st.days > 1 ? 's' : ''} × ₹${driverBataPerDay})`,
-        amount: driverBata
+    const my = ++quoteReq;
+    try {
+      const r = await api('/api/quote', {
+        method: 'POST',
+        body: { placeId: st.placeId, days: st.days, tripType: st.tripType, mode: st.mode }
       });
-    } else {
-      lines.push({
-        label: 'Self drive (no driver fee)',
-        amount: 0
-      });
+      if (my !== quoteReq) return; // a newer choice was made while waiting
+      lastQuote = r;
+      renderQuote(r);
+    } catch (err) {
+      if (my !== quoteReq) return;
+      lastQuote = null;
+      $('#timeline').innerHTML = '';
+      $('#quote-body').innerHTML = `<div class="msg err">${esc(err.message || 'Could not get the fare. Please try again.')}</div>`;
     }
-
-    const daysOptions = cfg.daysOptions || [1, 2, 3, 4, 5, 7];
-    const timeline = daysOptions.map((d) => ({
-      days: d,
-      billableKm,
-      total: kmFare + (st.mode === 'driver' ? (driverBataPerDay * d) : 0)
-    }));
-
-    const r = {
-      place,
-      quote: {
-        totalKm,
-        billableKm,
-        includedKm: totalKm,
-        days: st.days,
-        total,
-        lines,
-        deposit: st.mode === 'self' ? depositAmount : 0
-      },
-      timeline
-    };
-
-    lastQuote = r;
-    renderQuote(r);
   }
 
   function renderQuote(r) {
@@ -144,10 +106,12 @@
     ].map((f) => `<span class="fact">${esc(f)}</span>`).join('');
 
     const defaultNotes = [
-      'Rate: Flat ₹12 per km across all destinations.',
-      'Driver bata: ₹200/day (only for with driver).',
-      'Tolls, parking and border permits are extra as per actuals.',
-      'Self drive: Fuel paid by customer. ₹5,000 refundable deposit taken at pickup.'
+      'Rate: ₹12 per km (a round trip counts both ways).',
+      'With driver: minimum 250 km billed per day, plus driver bata ₹200 per day.',
+      'Short trips up to 60 km (1 day): ₹12 per km, minimum fare ₹1,200.',
+      'Self drive: ₹2,400 per day includes 250 km per day; extra km ₹12. Fuel paid by customer.',
+      'Self drive: ₹5,000 refundable deposit taken at pickup.',
+      'Tolls, parking and border permits are extra as per actuals.'
     ];
     const notesToShow = (cfg.priceNotes && cfg.priceNotes.length) ? cfg.priceNotes : defaultNotes;
 

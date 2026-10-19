@@ -201,6 +201,97 @@ async function newSession(userId) {
 }
 const publicUser = (u) => ({ id: u.id, name: u.name, phone: u.phone, email: u.email || '' });
 
+/* ---------- email to the owner when a booking is made ---------- */
+// Needs env vars: RESEND_API_KEY and OWNER_EMAIL (optional: MAIL_FROM). If missing, booking still works.
+async function emailOwner(b) {
+  const key = process.env.RESEND_API_KEY;
+  const to = process.env.OWNER_EMAIL;
+  if (!key || !to) { console.warn('Owner email skipped: set RESEND_API_KEY and OWNER_EMAIL'); return; }
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = [
+    ['Booking ID', b.id],
+    ['Customer name', b.name],
+    ['Mobile', b.phone],
+    ['Destination', 'Jadcherla → ' + b.placeName + ' (' + b.state + ')'],
+    ['Trip type', b.tripType === 'oneway' ? 'One-way drop' : 'Round trip'],
+    ['Driver', b.mode === 'self' ? 'Self drive' : 'With driver'],
+    ['Dates', b.startDate + ' to ' + b.endDate + ' (' + b.days + ' day' + (b.days > 1 ? 's' : '') + ')'],
+    ['Passengers', b.passengers],
+    ['Pickup place', b.pickupPoint],
+    ['Estimated fare', '₹' + b.fare],
+    ['Deposit (self drive)', b.deposit ? '₹' + b.deposit : '-'],
+    ['Notes', b.notes || '-'],
+  ];
+  const html = '<h2>New booking request - ' + esc(b.id) + '</h2><table cellpadding="6" style="border-collapse:collapse">' +
+    rows.map((r) => '<tr><td style="border:1px solid #ddd"><b>' + esc(r[0]) + '</b></td><td style="border:1px solid #ddd">' + esc(r[1]) + '</td></tr>').join('') +
+    '</table><p>Open /admin.html to confirm or reject this booking.</p>';
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: process.env.MAIL_FROM || 'Vinayaka Car Rentals <onboarding@resend.dev>',
+        to: [to],
+        subject: 'New booking ' + b.id + ' - ' + b.placeName + ' - ₹' + b.fare,
+        html,
+      }),
+      signal: ctl.signal,
+    });
+    clearTimeout(timer);
+    if (!r.ok) console.error('Owner email failed:', r.status, await r.text());
+  } catch (e) {
+    console.error('Owner email error:', e.message);
+  }
+}
+
+/* ---------- WhatsApp alert to the owner ---------- */
+// Free option (CallMeBot). Needs env vars: CALLMEBOT_PHONE (owner number with country code, e.g. 919876543210)
+// and CALLMEBOT_APIKEY. If missing, it is skipped and the booking still works.
+function bookingText(b) {
+  return [
+    'NEW BOOKING ' + b.id,
+    'Name: ' + b.name,
+    'Mobile: ' + b.phone,
+    'Trip: Jadcherla -> ' + b.placeName + ' (' + (b.tripType === 'oneway' ? 'one-way' : 'round trip') + ')',
+    'Driver: ' + (b.mode === 'self' ? 'Self drive' : 'With driver'),
+    'Dates: ' + b.startDate + ' to ' + b.endDate + ' (' + b.days + ' day' + (b.days > 1 ? 's' : '') + ')',
+    'Passengers: ' + b.passengers,
+    'Pickup: ' + b.pickupPoint,
+    'Fare: Rs.' + b.fare + (b.deposit ? ' + deposit Rs.' + b.deposit : ''),
+    b.notes ? 'Notes: ' + b.notes : '',
+  ].filter(Boolean).join('\n');
+}
+
+async function whatsappOwner(b) {
+  const phone = String(process.env.CALLMEBOT_PHONE || '').replace(/\D/g, '');
+  const apikey = process.env.CALLMEBOT_APIKEY;
+  if (!phone || !apikey) { console.warn('WhatsApp alert skipped: set CALLMEBOT_PHONE and CALLMEBOT_APIKEY'); return; }
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 8000);
+    const u = 'https://api.callmebot.com/whatsapp.php?phone=' + encodeURIComponent('+' + phone) +
+      '&text=' + encodeURIComponent(bookingText(b)) + '&apikey=' + encodeURIComponent(apikey);
+    const r = await fetch(u, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!r.ok) console.error('WhatsApp alert failed:', r.status, await r.text());
+  } catch (e) {
+    console.error('WhatsApp alert error:', e.message);
+  }
+}
+
+// Click-to-chat link: opens WhatsApp to the owner with the booking details already typed.
+function ownerWhatsAppLink(b) {
+  let num = String(config.whatsapp || config.phone || '').replace(/\D/g, '');
+  if (num.length === 10) num = '91' + num;
+  return 'https://wa.me/' + num + '?text=' + encodeURIComponent(bookingText(b));
+}
+
+async function notifyOwner(b) {
+  await Promise.allSettled([whatsappOwner(b), emailOwner(b)]);
+}
+
 /* ---------- API routes ---------- */
 const routes = [];
 const route = (method, pattern, handler) => routes.push({ method, re: new RegExp('^' + pattern + '$'), handler });
@@ -296,7 +387,8 @@ route('POST', '/api/bookings', async (req, body) => {
   }
   await kv.sadd('bookings', booking.id);
   await kv.sadd('ubookings:' + user.id, booking.id);
-  return { booking };
+  await notifyOwner(booking); // must finish before replying, otherwise Vercel may stop the function
+  return { booking, whatsappLink: ownerWhatsAppLink(booking) };
 });
 
 route('GET', '/api/my-bookings', async (req) => {
