@@ -427,4 +427,7 @@ if (require.main === module) {
     console.log(ADMIN_KEY ? 'Admin page: /admin.html' : 'Admin page disabled. Start with ADMIN_KEY=yourSecret node server.js to enable /admin.html');
   });
 }
-module.exports = { handle, computeFare, places };
+module.exports = handle;
+module.exports.handle = handle;
+module.exports.computeFare = computeFare;
+module.exports.places = places;
