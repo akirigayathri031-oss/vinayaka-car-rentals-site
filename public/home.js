@@ -6,8 +6,8 @@
 
   try {
     const [c, p, b] = await Promise.all([
-      api('/api/config').catch(() => null),
-      api('/api/places').catch(() => []),
+      api('/api/config').catch(() => fetch('/config.json').then(r => r.json()).catch(() => null)),
+      api('/api/places').catch(() => fetch('/places.json').then(r => r.json()).catch(() => [])),
       api('/api/booked').catch(() => [])
     ]);
     if (c) cfg = Object.assign(cfg, c);
