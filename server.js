@@ -400,13 +400,18 @@ function serveStatic(req, res, pathname) {
 async function handle(req, res) {
   try {
     const url = new URL(req.url, 'http://localhost');
-    if (!url.pathname.startsWith('/api/')) {
+    let pathname = url.pathname;
+    const fwdPath = url.searchParams.get('__path');
+    if (fwdPath !== null) pathname = '/api/' + fwdPath.replace(/^\/+/, '');
+    if (pathname.length > 5 && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+
+    if (!pathname.startsWith('/api/')) {
       if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); return res.end(); }
-      return serveStatic(req, res, url.pathname);
+      return serveStatic(req, res, pathname);
     }
     for (const r of routes) {
       if (r.method !== req.method) continue;
-      const m = r.re.exec(url.pathname);
+      const m = r.re.exec(pathname);
       if (!m) continue;
       const body = req.method === 'POST' ? await readBody(req) : {};
       const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
